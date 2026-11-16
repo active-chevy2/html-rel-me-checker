@@ -93,6 +93,12 @@
       border: 1px solid var(--border);
     }
 
+    .form-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
     .input-group {
       display: flex;
       gap: 10px;
@@ -112,6 +118,81 @@
 
     input[type="text"]:focus {
       border-color: var(--accent);
+    }
+
+    .hp-field {
+      position: absolute;
+      left: -9999px;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+    }
+
+    .captcha-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 10px 12px;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .captcha-label {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-right: 2px;
+    }
+
+    .captcha-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .captcha-img {
+      display: block;
+      width: 156px;
+      height: 42px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+    }
+
+    button.icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      background: var(--surface);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 1.15rem;
+      cursor: pointer;
+      transition: border-color 0.15s ease, color 0.15s ease;
+    }
+
+    button.icon-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    button.icon-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    input.captcha-input {
+      flex: 0 1 130px;
+      min-width: 100px;
+      padding: 9px 12px;
+      font-size: 0.98rem;
+      background: var(--surface);
     }
 
     button.primary {
@@ -299,6 +380,9 @@
       button.secondary {
         width: 100%;
       }
+      input.captcha-input {
+        flex: 1 1 100%;
+      }
     }
   </style>
 </head>
@@ -310,18 +394,56 @@
       Inspect any webpage for <code>&lt;a&gt;</code> and <code>&lt;link&gt;</code> elements containing <code>rel="me"</code>.
     </p>
 
-    <form id="checkForm" class="input-group" novalidate>
-      <input
-        type="text"
-        id="urlInput"
-        inputmode="url"
-        autocomplete="url"
-        placeholder="https://example.com"
-        aria-label="Website URL"
-        required
-      >
-      <button type="submit" id="checkBtn" class="primary">Check URL</button>
-      <button type="button" id="clearBtn" class="secondary">Clear</button>
+    <form id="checkForm" class="form-stack" novalidate>
+      <div class="input-group">
+        <input
+          type="text"
+          id="urlInput"
+          inputmode="url"
+          autocomplete="url"
+          placeholder="https://example.com"
+          aria-label="Website URL"
+          required
+        >
+        <button type="submit" id="checkBtn" class="primary">Check URL</button>
+        <button type="button" id="clearBtn" class="secondary">Clear</button>
+      </div>
+
+      <div class="hp-field" aria-hidden="true">
+        <label for="hpField">Leave this field empty</label>
+        <input type="text" id="hpField" name="website" tabindex="-1" autocomplete="off">
+      </div>
+
+      <div class="captcha-row">
+        <span class="captcha-label">Anti-bot check:</span>
+        <div class="captcha-box">
+          <img
+            id="captchaImg"
+            class="captcha-img"
+            alt="Anti-bot math challenge"
+            width="156"
+            height="42"
+          >
+          <button
+            type="button"
+            id="refreshCaptchaBtn"
+            class="icon-btn"
+            aria-label="Refresh anti-bot challenge"
+            title="New challenge"
+          >&#8635;</button>
+        </div>
+        <input
+          type="text"
+          id="captchaInput"
+          class="captcha-input"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          autocomplete="off"
+          placeholder="Answer"
+          aria-label="Anti-bot math answer"
+          required
+        >
+      </div>
     </form>
 
     <div id="status" role="status" aria-live="polite"></div>
@@ -332,11 +454,17 @@
   <script>
     const form = document.getElementById('checkForm');
     const urlInput = document.getElementById('urlInput');
+    const hpField = document.getElementById('hpField');
+    const captchaImg = document.getElementById('captchaImg');
+    const captchaInput = document.getElementById('captchaInput');
+    const refreshCaptchaBtn = document.getElementById('refreshCaptchaBtn');
     const statusEl = document.getElementById('status');
     const metaEl = document.getElementById('meta');
     const resultsEl = document.getElementById('results');
     const checkBtn = document.getElementById('checkBtn');
     const clearBtn = document.getElementById('clearBtn');
+
+    let currentCaptchaToken = '';
 
     function setStatus(message, type) {
       statusEl.textContent = message;
@@ -348,6 +476,25 @@
       statusEl.className = '';
       metaEl.textContent = '';
       resultsEl.innerHTML = '';
+    }
+
+    async function loadCaptcha() {
+      refreshCaptchaBtn.disabled = true;
+      try {
+        const res = await fetch('/api/challenge', { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.error || 'Failed to load anti-bot challenge.');
+        }
+        currentCaptchaToken = data.token;
+        captchaImg.src = data.image;
+        captchaInput.value = '';
+      } catch (err) {
+        currentCaptchaToken = '';
+        setStatus(`Anti-bot error: ${err.message}`, 'error');
+      } finally {
+        refreshCaptchaBtn.disabled = false;
+      }
     }
 
     function normaliseInputUrl(raw) {
@@ -544,20 +691,43 @@
       if (event) event.preventDefault();
 
       const targetUrl = normaliseInputUrl(urlInput.value);
+      const captchaAnswer = captchaInput.value.trim();
       clearOutput();
 
       if (!targetUrl) {
         setStatus('Please enter a valid URL.', 'error');
+        urlInput.focus();
+        return;
+      }
+
+      if (!currentCaptchaToken) {
+        setStatus('Loading anti-bot challenge...', 'loading');
+        await loadCaptcha();
+        captchaInput.focus();
+        return;
+      }
+
+      if (!captchaAnswer) {
+        setStatus('Please solve the anti-bot math check before submitting.', 'error');
+        captchaInput.focus();
         return;
       }
 
       urlInput.value = targetUrl;
       checkBtn.disabled = true;
       clearBtn.disabled = true;
+      refreshCaptchaBtn.disabled = true;
       setStatus('Fetching webpage...', 'loading');
 
       try {
-        const response = await fetch(`/api/check?url=${encodeURIComponent(targetUrl)}`);
+        const params = new URLSearchParams({
+          url: targetUrl,
+          captchaToken: currentCaptchaToken,
+          captchaAnswer,
+          hp: hpField.value
+        });
+
+        const response = await fetch(`/api/check?${params.toString()}`);
         const data = await response.json();
 
         if (!response.ok || data.error) {
@@ -609,15 +779,23 @@
       } finally {
         checkBtn.disabled = false;
         clearBtn.disabled = false;
+        await loadCaptcha();
       }
     }
 
     form.addEventListener('submit', checkRelMe);
+    refreshCaptchaBtn.addEventListener('click', () => {
+      loadCaptcha();
+      captchaInput.focus();
+    });
     clearBtn.addEventListener('click', () => {
       urlInput.value = '';
       clearOutput();
+      loadCaptcha();
       urlInput.focus();
     });
+
+    loadCaptcha();
   </script>
 
 </body>

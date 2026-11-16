@@ -6,6 +6,7 @@ services:
     environment:
       - PORT=${CONTAINER_PORT:-3000}
       - TRUST_PROXY=${TRUST_PROXY:-false}
+      - CAPTCHA_SECRET=${CAPTCHA_SECRET:-}
     ports:
       - "${HOST_PORT:-8080}:${CONTAINER_PORT:-3000}"
     init: true
