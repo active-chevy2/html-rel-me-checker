@@ -137,6 +137,29 @@
       opacity: 0.8;
     }
 
+    button.secondary {
+      padding: 11px 14px;
+      background: var(--surface-alt);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.94rem;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: border-color 0.15s ease, color 0.15s ease;
+    }
+
+    button.secondary:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    button.secondary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     #status {
       margin-top: 18px;
       padding: 12px 14px;
@@ -215,6 +238,22 @@
       flex-wrap: wrap;
     }
 
+    .pill {
+      font-size: 0.76rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      background: var(--surface);
+    }
+
+    .pill.warn {
+      color: var(--warn-text);
+      background: var(--warn-bg);
+      border-color: var(--warn-border);
+    }
+
     button.copy-btn {
       padding: 4px 10px;
       font-size: 0.82rem;
@@ -256,7 +295,8 @@
       .input-group {
         flex-direction: column;
       }
-      button.primary {
+      button.primary,
+      button.secondary {
         width: 100%;
       }
     }
@@ -281,6 +321,7 @@
         required
       >
       <button type="submit" id="checkBtn" class="primary">Check URL</button>
+      <button type="button" id="clearBtn" class="secondary">Clear</button>
     </form>
 
     <div id="status" role="status" aria-live="polite"></div>
@@ -295,33 +336,78 @@
     const metaEl = document.getElementById('meta');
     const resultsEl = document.getElementById('results');
     const checkBtn = document.getElementById('checkBtn');
+    const clearBtn = document.getElementById('clearBtn');
 
     function setStatus(message, type) {
       statusEl.textContent = message;
       statusEl.className = `visible ${type}`;
     }
 
+    function clearOutput() {
+      statusEl.textContent = '';
+      statusEl.className = '';
+      metaEl.textContent = '';
+      resultsEl.innerHTML = '';
+    }
+
     function normaliseInputUrl(raw) {
       const trimmed = raw.trim();
       if (!trimmed) return '';
-      if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
-        return `https://${trimmed}`;
+      if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
       }
-      return trimmed;
+      if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)) {
+        return trimmed;
+      }
+      return `https://${trimmed}`;
+    }
+
+    function getEffectiveBaseUrl(doc, fallbackUrl) {
+      const baseEl = doc.querySelector('base[href]');
+      if (!baseEl) return fallbackUrl;
+      const rawBase = (baseEl.getAttribute('href') || '').trim();
+      if (!rawBase) return fallbackUrl;
+      try {
+        return new URL(rawBase, fallbackUrl).href;
+      } catch {
+        return fallbackUrl;
+      }
     }
 
     function resolveHref(rawHref, baseUrl) {
-      if (!rawHref) return { displayHref: '(no href)', resolvedUrl: null, isHttp: false };
+      if (!rawHref) {
+        return { displayHref: '(no href)', resolvedUrl: null, isHttp: false, protocol: '' };
+      }
       try {
         const parsed = new URL(rawHref, baseUrl);
         const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
         return {
           displayHref: rawHref,
           resolvedUrl: parsed.href,
-          isHttp
+          isHttp,
+          protocol: parsed.protocol
         };
       } catch {
-        return { displayHref: rawHref, resolvedUrl: null, isHttp: false };
+        return { displayHref: rawHref, resolvedUrl: null, isHttp: false, protocol: '' };
+      }
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (!copied) {
+        throw new Error('Copy command failed');
       }
     }
 
@@ -343,6 +429,21 @@
 
       badges.appendChild(tagCode);
       badges.appendChild(relCode);
+
+      if (item.protocol === 'http:') {
+        const httpPill = document.createElement('span');
+        httpPill.className = 'pill warn';
+        httpPill.textContent = 'HTTP (non-HTTPS)';
+        badges.appendChild(httpPill);
+      }
+
+      if (item.isDuplicate) {
+        const dupPill = document.createElement('span');
+        dupPill.className = 'pill';
+        dupPill.textContent = 'Duplicate URL';
+        badges.appendChild(dupPill);
+      }
+
       header.appendChild(badges);
 
       if (item.resolvedUrl) {
@@ -352,7 +453,7 @@
         copyBtn.textContent = 'Copy URL';
         copyBtn.addEventListener('click', async () => {
           try {
-            await navigator.clipboard.writeText(item.resolvedUrl);
+            await copyText(item.resolvedUrl);
             copyBtn.textContent = 'Copied!';
             setTimeout(() => {
               copyBtn.textContent = 'Copy URL';
@@ -412,6 +513,30 @@
         li.appendChild(textRow);
       }
 
+      if (item.title) {
+        const titleRow = document.createElement('div');
+        titleRow.className = 'result-row';
+        const titleLabel = document.createElement('strong');
+        titleLabel.textContent = 'Title Attribute: ';
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = item.title;
+        titleRow.appendChild(titleLabel);
+        titleRow.appendChild(titleSpan);
+        li.appendChild(titleRow);
+      }
+
+      if (item.type) {
+        const typeRow = document.createElement('div');
+        typeRow.className = 'result-row';
+        const typeLabel = document.createElement('strong');
+        typeLabel.textContent = 'Type Attribute: ';
+        const typeCode = document.createElement('code');
+        typeCode.textContent = item.type;
+        typeRow.appendChild(typeLabel);
+        typeRow.appendChild(typeCode);
+        li.appendChild(typeRow);
+      }
+
       return li;
     }
 
@@ -419,8 +544,7 @@
       if (event) event.preventDefault();
 
       const targetUrl = normaliseInputUrl(urlInput.value);
-      resultsEl.innerHTML = '';
-      metaEl.textContent = '';
+      clearOutput();
 
       if (!targetUrl) {
         setStatus('Please enter a valid URL.', 'error');
@@ -429,6 +553,7 @@
 
       urlInput.value = targetUrl;
       checkBtn.disabled = true;
+      clearBtn.disabled = true;
       setStatus('Fetching webpage...', 'loading');
 
       try {
@@ -439,24 +564,33 @@
           throw new Error(data.error || `Server returned HTTP ${response.status}`);
         }
 
-        const baseUrl = data.finalUrl || targetUrl;
-        metaEl.textContent = `Inspected: ${baseUrl} (HTTP ${data.status})`;
-
         const parser = new DOMParser();
         const doc = parser.parseFromString(data.html, 'text/html');
+        const effectiveBaseUrl = getEffectiveBaseUrl(doc, data.finalUrl || targetUrl);
+
+        metaEl.textContent = `Inspected: ${data.finalUrl || targetUrl} (HTTP ${data.status})`;
+
         const candidates = doc.querySelectorAll('a[rel], link[rel]');
         const matches = [];
+        const seenUrls = new Set();
 
         candidates.forEach(el => {
           const rawRel = el.getAttribute('rel') || '';
           const relTokens = rawRel.toLowerCase().trim().split(/\s+/);
           if (relTokens.includes('me')) {
             const rawHref = (el.getAttribute('href') || '').trim();
-            const resolved = resolveHref(rawHref, baseUrl);
+            const resolved = resolveHref(rawHref, effectiveBaseUrl);
+            const dedupeKey = resolved.resolvedUrl || resolved.displayHref;
+            const isDuplicate = seenUrls.has(dedupeKey);
+            seenUrls.add(dedupeKey);
+
             matches.push({
               tag: el.tagName.toLowerCase(),
               rel: rawRel.trim(),
               text: el.textContent.replace(/\s+/g, ' ').trim(),
+              title: (el.getAttribute('title') || '').trim(),
+              type: (el.getAttribute('type') || '').trim(),
+              isDuplicate,
               ...resolved
             });
           }
@@ -474,10 +608,16 @@
         setStatus(`Error: ${err.message}`, 'error');
       } finally {
         checkBtn.disabled = false;
+        clearBtn.disabled = false;
       }
     }
 
     form.addEventListener('submit', checkRelMe);
+    clearBtn.addEventListener('click', () => {
+      urlInput.value = '';
+      clearOutput();
+      urlInput.focus();
+    });
   </script>
 
 </body>
